@@ -1,161 +1,296 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  font-family: system-ui, sans-serif;
+// ====== CONFIG – put your Supabase values here ======
+const SUPABASE_URL = "YOUR_SUPABASE_URL";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let currentUser = null;
+let currentTrackerId = null;
+
+// DOM ELEMENTS
+const authSection = document.getElementById("auth");
+const dashboardSection = document.getElementById("dashboard");
+const userEmailSpan = document.getElementById("user-email");
+
+const tabLogin = document.getElementById("tab-login");
+const tabSignup = document.getElementById("tab-signup");
+const loginForm = document.getElementById("login-form");
+const signupForm = document.getElementById("signup-form");
+const loginMsg = document.getElementById("login-msg");
+const signupMsg = document.getElementById("signup-msg");
+
+const heroGetStarted = document.getElementById("hero-get-started");
+const logoutBtn = document.getElementById("logout-btn");
+
+const trackerForm = document.getElementById("tracker-form");
+const trackerNameInput = document.getElementById("tracker-name");
+const trackerTypeInput = document.getElementById("tracker-type");
+const trackerFormMsg = document.getElementById("tracker-form-msg");
+
+const trackerList = document.getElementById("tracker-list");
+const trackerListEmpty = document.getElementById("tracker-list-empty");
+
+const entriesTitle = document.getElementById("entries-title");
+const entryForm = document.getElementById("entry-form");
+const entryDateInput = document.getElementById("entry-date");
+const entryValueInput = document.getElementById("entry-value");
+const entryNoteInput = document.getElementById("entry-note");
+const entryFormMsg = document.getElementById("entry-form-msg");
+const entryList = document.getElementById("entry-list");
+
+const proLink = document.getElementById("pro-link");
+const pricingProBtn = document.getElementById("pricing-pro-btn");
+
+// ====== BASIC NAV HELPERS ======
+heroGetStarted.addEventListener("click", () => {
+  document.getElementById("auth").scrollIntoView({ behavior: "smooth" });
+});
+
+// Make Pro buttons show a message until you add Stripe
+const handleProClick = (e) => {
+  e.preventDefault();
+  alert("To make money, create a Stripe payment link and paste it into the Go Pro buttons.");
+};
+proLink.addEventListener("click", handleProClick);
+pricingProBtn.addEventListener("click", handleProClick);
+
+// ====== AUTH TABS ======
+tabLogin.addEventListener("click", () => {
+  tabLogin.classList.add("active");
+  tabSignup.classList.remove("active");
+  loginForm.classList.remove("hidden");
+  signupForm.classList.add("hidden");
+});
+
+tabSignup.addEventListener("click", () => {
+  tabSignup.classList.add("active");
+  tabLogin.classList.remove("active");
+  signupForm.classList.remove("hidden");
+  loginForm.classList.add("hidden");
+});
+
+// ====== SIGN UP ======
+signupForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  signupMsg.textContent = "";
+  const email = document.getElementById("signup-email").value.trim();
+  const password = document.getElementById("signup-password").value.trim();
+
+  signupMsg.textContent = "Signing up...";
+  const { data, error } = await db.auth.signUp({ email, password });
+  if (error) {
+    signupMsg.textContent = error.message;
+  } else {
+    signupMsg.textContent = "Check your email to confirm, then log in.";
+  }
+});
+
+// ====== LOG IN ======
+loginForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  loginMsg.textContent = "";
+  const email = document.getElementById("login-email").value.trim();
+  const password = document.getElementById("login-password").value.trim();
+
+  loginMsg.textContent = "Logging in...";
+  const { data, error } = await db.auth.signInWithPassword({ email, password });
+  if (error) {
+    loginMsg.textContent = error.message;
+  } else {
+    loginMsg.textContent = "";
+    await loadSession();
+  }
+});
+
+// ====== LOG OUT ======
+logoutBtn.addEventListener("click", async () => {
+  await db.auth.signOut();
+  currentUser = null;
+  showAuth();
+});
+
+// ====== SESSION HANDLING ======
+async function loadSession() {
+  const { data } = await db.auth.getUser();
+  if (data.user) {
+    currentUser = data.user;
+    userEmailSpan.textContent = currentUser.email;
+    showDashboard();
+    await loadTrackers();
+  } else {
+    showAuth();
+  }
 }
 
-body {
-  background: #0d1117;
-  color: #f0f6fc;
+function showDashboard() {
+  authSection.classList.add("hidden");
+  dashboardSection.classList.remove("hidden");
 }
 
-/* NAVBAR */
-.navbar {
-  display: flex;
-  justify-content: space-between;
-  padding: 16px 40px;
-  background: rgba(13,17,23,0.9);
-  backdrop-filter: blur(10px);
-  position: sticky;
-  top: 0;
+function showAuth() {
+  authSection.classList.remove("hidden");
+  dashboardSection.classList.add("hidden");
 }
 
-.navbar a {
-  margin-right: 20px;
-  color: #c9d1d9;
-  text-decoration: none;
-  font-size: 15px;
+// ====== TRACKERS ======
+trackerForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  trackerFormMsg.textContent = "";
+
+  if (!currentUser) {
+    trackerFormMsg.textContent = "You must be logged in.";
+    return;
+  }
+
+  const name = trackerNameInput.value.trim();
+  const type = trackerTypeInput.value.trim();
+
+  if (!name || !type) {
+    trackerFormMsg.textContent = "Please fill in all fields.";
+    return;
+  }
+
+  trackerFormMsg.textContent = "Saving...";
+  const { error } = await db.from("trackers").insert({
+    user_id: currentUser.id,
+    name,
+    type
+  });
+
+  if (error) {
+    trackerFormMsg.textContent = error.message;
+  } else {
+    trackerFormMsg.textContent = "Tracker added.";
+    trackerNameInput.value = "";
+    trackerTypeInput.value = "";
+    await loadTrackers();
+  }
+});
+
+async function loadTrackers() {
+  if (!currentUser) return;
+
+  const { data, error } = await db
+    .from("trackers")
+    .select("id, name, type, created_at")
+    .eq("user_id", currentUser.id)
+    .order("created_at", { ascending: true });
+
+  trackerList.innerHTML = "";
+  if (error) {
+    trackerListEmpty.textContent = error.message;
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    trackerListEmpty.classList.remove("hidden");
+    return;
+  }
+
+  trackerListEmpty.classList.add("hidden");
+
+  data.forEach((tracker) => {
+    const li = document.createElement("li");
+    const left = document.createElement("span");
+    left.textContent = `${tracker.name} (${tracker.type})`;
+
+    const btn = document.createElement("button");
+    btn.className = "btn small outline";
+    btn.textContent = "Open";
+    btn.addEventListener("click", () => selectTracker(tracker));
+
+    li.appendChild(left);
+    li.appendChild(btn);
+    trackerList.appendChild(li);
+  });
 }
 
-.logo {
-  font-size: 22px;
-  font-weight: 700;
+async function selectTracker(tracker) {
+  currentTrackerId = tracker.id;
+  entriesTitle.textContent = `Entries – ${tracker.name}`;
+  entryForm.classList.remove("hidden");
+  entryFormMsg.textContent = "";
+  await loadEntries();
 }
 
-/* HERO */
-.hero {
-  padding: 100px 40px;
-  text-align: center;
+// ====== ENTRIES ======
+entryForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  entryFormMsg.textContent = "";
+
+  if (!currentTrackerId) {
+    entryFormMsg.textContent = "Select a tracker first.";
+    return;
+  }
+
+  const date = entryDateInput.value;
+  const value = entryValueInput.value.trim();
+  const note = entryNoteInput.value.trim();
+
+  if (!date || !value) {
+    entryFormMsg.textContent = "Date and value are required.";
+    return;
+  }
+
+  entryFormMsg.textContent = "Saving...";
+  const { error } = await db.from("entries").insert({
+    tracker_id: currentTrackerId,
+    date,
+    value,
+    note
+  });
+
+  if (error) {
+    entryFormMsg.textContent = error.message;
+  } else {
+    entryFormMsg.textContent = "Entry added.";
+    entryValueInput.value = "";
+    entryNoteInput.value = "";
+    await loadEntries();
+  }
+});
+
+async function loadEntries() {
+  entryList.innerHTML = "";
+
+  if (!currentTrackerId) {
+    return;
+  }
+
+  const { data, error } = await db
+    .from("entries")
+    .select("id, date, value, note, created_at")
+    .eq("tracker_id", currentTrackerId)
+    .order("date", { ascending: false });
+
+  if (error) {
+    entryFormMsg.textContent = error.message;
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "No entries yet. Add one above.";
+    entryList.appendChild(li);
+    return;
+  }
+
+  data.forEach((entry) => {
+    const li = document.createElement("li");
+    const top = document.createElement("span");
+    top.textContent = `${entry.date} – ${entry.value}`;
+
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = entry.note ? entry.note : "";
+
+    li.appendChild(top);
+    li.appendChild(meta);
+    entryList.appendChild(li);
+  });
 }
 
-.hero h1 {
-  font-size: 42px;
-  margin-bottom: 20px;
-}
+// ====== INIT ======
+loadSession();
 
-.hero p {
-  font-size: 18px;
-  margin-bottom: 30px;
-}
-
-.buttons {
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-}
-
-.note {
-  font-size: 13px;
-  opacity: 0.8;
-  margin-top: 10px;
-}
-
-/* BUTTONS */
-.btn {
-  padding: 12px 22px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  border: none;
-}
-
-.primary {
-  background: #238636;
-  color: white;
-}
-
-.secondary {
-  background: #30363d;
-  color: white;
-}
-
-.outline {
-  border: 2px solid #30363d;
-  background: none;
-  color: white;
-}
-
-.link {
-  background: none;
-  color: #58a6ff;
-}
-
-/* SECTIONS */
-.section {
-  padding: 80px 40px;
-  text-align: center;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 24px;
-  margin-top: 40px;
-}
-
-.card {
-  background: #161b22;
-  padding: 24px;
-  border-radius: 12px;
-}
-
-.highlight {
-  border: 2px solid #238636;
-}
-
-/* PRICING */
-.pricing {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 24px;
-  margin-top: 40px;
-}
-
-.price {
-  font-size: 30px;
-  margin: 20px 0;
-}
-
-/* MODAL */
-.modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0,0,0,0.7);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.hidden {
-  display: none;
-}
-
-.modal-content {
-  background: #161b22;
-  padding: 30px;
-  border-radius: 12px;
-  text-align: center;
-  width: 300px;
-}
-
-.modal-content input {
-  width: 100%;
-  padding: 10px;
-  margin: 16px 0;
-  border-radius: 8px;
-  border: none;
-}
